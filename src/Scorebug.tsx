@@ -5,7 +5,7 @@
 
 import { useRef, type PointerEvent, type ReactNode } from "react";
 import { Box } from "@mantine/core";
-import type { Down, Side } from "@situational-football/schemas";
+import type { Down, GameState, Side } from "@situational-football/schemas";
 import { DOWNS } from "./engine";
 import { spotFrom, type Option } from "./fields";
 import type { SharedSituation } from "./SituationForm";
@@ -47,6 +47,22 @@ export interface ScorebugProps {
   noBall?: ReactNode;
   /** Mode settings, shown in the strip under the bug: BugSelects. */
   settings?: ReactNode;
+  /** The game is over: the bug shows the final, with the ball where it ended up and whose it was. */
+  final?: { oppBall: boolean } | undefined;
+}
+
+/**
+ * The end of a game as the bug shows it: the clock at 0:00, the final score, and the ball's spot from your
+ * end of the field, whichever team had it.
+ */
+export function finalBug(g: GameState): { situation: BugSituation; margin: number; final: { oppBall: boolean } } {
+  const fromYours = g.poss === "you" ? g.ytg : 100 - g.ytg;
+  const ytg = Math.min(99, Math.max(1, fromYours));
+  return {
+    situation: { timeouts: g.timeouts.you, oppTimeouts: g.timeouts.opp, ball: { down: g.down, toGo: 0, ...spotFrom(ytg) } },
+    margin: g.margin,
+    final: { oppBall: g.poss !== "you" },
+  };
 }
 
 const ORDINALS = ["1st", "2nd", "3rd", "4th"] as const;
@@ -200,21 +216,22 @@ function FieldStrip({ marks, onBall, ends = ["You", "Them"] }: {
 }
 
 export default function Scorebug({
-  situation: s, set, clock, clockNote, margin, marginOptions, onMargin, scoreLabel = "Score", noBall, settings,
+  situation: s, set, clock, clockNote, margin, marginOptions, onMargin, scoreLabel = "Score", noBall, settings, final,
 }: ScorebugProps) {
-  const score = marginOptions.find((o) => o.value === margin)?.label ?? String(margin);
+  const score = marginOptions.find((o) => o.value === margin)?.label
+    ?? (margin > 0 ? `Up ${margin}` : margin < 0 ? `Down ${-margin}` : "Tied");
   const tone = margin > 0 ? "ahead" : margin < 0 ? "behind" : "tied";
   const placeBall = (yards: number) => set(spotFrom(100 - yards));
   const marks = s.ball === undefined ? null : fieldMarks(s.ball.side, s.ball.yardLine, s.ball.toGo);
   const running = s.running;
 
   return (
-    <section className={marks === null ? "scorebug no-ball" : "scorebug"} aria-label="Situation">
+    <section className={`scorebug${marks === null ? " no-ball" : ""}${final ? " final" : ""}`} aria-label={final ? "Final" : "Situation"}>
       <div className="sb-bar">
         <div className="sb-team you">
           <span className="sb-name">
             You
-            <span className="sb-poss" role="img" aria-label="has the ball" title="Has the ball"><Football className="sb-poss-ball" /></span>
+            {!final?.oppBall && <span className="sb-poss" role="img" aria-label="has the ball" title="Has the ball"><Football className="sb-poss-ball" /></span>}
           </span>
           <Timeouts left={s.timeouts} team="You" onChange={(n) => set({ timeouts: n })} />
         </div>
@@ -223,7 +240,10 @@ export default function Scorebug({
           <BugSelect label={scoreLabel} value={margin} options={marginOptions} onChange={onMargin} className="sb-big">{score}</BugSelect>
         </div>
         <div className="sb-team opp">
-          <span className="sb-name">Them</span>
+          <span className="sb-name">
+            Them
+            {final?.oppBall && <span className="sb-poss" role="img" aria-label="has the ball" title="Has the ball"><Football className="sb-poss-ball" /></span>}
+          </span>
           <Timeouts left={s.oppTimeouts} team="Them" onChange={(n) => set({ oppTimeouts: n })} />
         </div>
         <div className="sb-clock">
@@ -241,6 +261,8 @@ export default function Scorebug({
             </span>
             {clock.error !== null ? (
               <span className="sb-cap sb-clock-error">Enter M:SS</span>
+            ) : final ? (
+              <span className="sb-cap sb-final">Final</span>
             ) : running === undefined ? (
               <span className="sb-cap">{clockNote}</span>
             ) : (
@@ -254,7 +276,12 @@ export default function Scorebug({
           </span>
         </div>
         <div className="sb-down">
-          {s.ball === undefined || marks === null ? noBall : (
+          {s.ball === undefined || marks === null ? noBall : final ? (
+            <>
+              <span className="sb-big sb-dd">{spotName(marks.ball)}</span>
+              <span className="sb-cap sb-spot">Ball on</span>
+            </>
+          ) : (
             <BallCell ball={s.ball} marks={marks} set={set} placeBall={placeBall} />
           )}
         </div>

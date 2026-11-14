@@ -8,7 +8,7 @@ import { formatClock } from "./time";
 import { Timeline, useClockField, useDebouncedByKey, yardsToGoalFrom } from "./fields";
 import { ModeLayout, sharedFromGame } from "./SituationForm";
 import { GuideLink } from "./ReadMore";
-import Scorebug, { BugSelect, bugSituation } from "./Scorebug";
+import Scorebug, { BugSelect, bugSituation, finalBug } from "./Scorebug";
 import Trainer from "./Trainer";
 import { SCORE_OPTIONS, randomSituation, useScoreSwitch } from "./trainerScore";
 
@@ -44,10 +44,15 @@ export default function RunOutPanel() {
   };
   const sim = useDebouncedByKey(game, JSON.stringify(game));
 
+  // When the game is over, the scorebug shows the final. Editing it goes back to the situation.
+  const [final, setFinal] = useState<GameState | null>(null);
+  const fin = final === null ? null : finalBug(final);
+  const edit = <T,>(f: (v: T) => void) => (v: T) => { setFinal(null); f(v); };
   const scorebug = (
     <Scorebug
-      situation={bugSituation(s)} set={set} clock={clock}
-      margin={s.lead} marginOptions={SCORE_OPTIONS} onMargin={(m) => switchScore(m, s, (lead) => set({ lead }))}
+      situation={fin?.situation ?? bugSituation(s)} set={edit(set)}
+      clock={fin ? { text: "0:00", error: null, onType: edit(clock.onType) } : clock} final={fin?.final}
+      margin={fin?.margin ?? s.lead} marginOptions={SCORE_OPTIONS} onMargin={edit((m: number) => switchScore(m, s, (lead) => set({ lead })))}
       settings={
         <span className="sb-setting">
           <span className="sb-setting-label">Run out with</span>
@@ -68,7 +73,7 @@ export default function RunOutPanel() {
         <Alert color="gray">Enter the clock as M:SS, for example 2:05.</Alert>
       ) : (
         <Stack gap="lg">
-          <Trainer key={deal} onNewDrive={randomize} game={sim.value} pending={sim.pending} onChange={(g) => switchScore(g.margin, sharedFromGame(g), (lead) => set({ ...sharedFromGame(g), lead }))} />
+          <Trainer key={deal} onNewDrive={randomize} onFinal={setFinal} game={sim.value} pending={sim.pending} onChange={(g) => switchScore(g.margin, sharedFromGame(g), (lead) => set({ ...sharedFromGame(g), lead }))} />
           <Group justify="space-between" align="baseline">
             <Title order={2}>Can you run it out?</Title>
             <GuideLink section="running-out-the-clock">How this works</GuideLink>

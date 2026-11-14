@@ -1057,3 +1057,6 @@ nav[aria-label="Guide sections"] .mantine-List-item {
 @media (prefers-reduced-motion: reduce) {
   .play-flash-band { animation: play-flash-wash 3000ms ease both; }
 }
+
+/* The final: "Final" under 0:00 in the bug's yellow. */
+.scorebug.final .sb-final { color: var(--mantine-color-yellow-4); font-weight: 700; letter-spacing: 0.12em; }

@@ -7,7 +7,7 @@ import { DEFAULT_SIM, type GameState } from "./sim";
 import { Timeline, useClockField, useDebouncedByKey, yardsToGoalFrom } from "./fields";
 import { ModeLayout, sharedFromGame } from "./SituationForm";
 import { GuideLink } from "./ReadMore";
-import Scorebug, { bugSituation } from "./Scorebug";
+import Scorebug, { bugSituation, finalBug } from "./Scorebug";
 import HurryUpSetting from "./HurryUpSetting";
 import Trainer from "./Trainer";
 import { SCORE_OPTIONS, randomSituation, useScoreSwitch } from "./trainerScore";
@@ -55,10 +55,15 @@ export default function TrailingPanel() {
   const sim = useDebouncedByKey(game, `${JSON.stringify(game)}/${hurryUp}`);
   const cfg = useMemo(() => ({ ...DEFAULT_SIM, hurryUp }), [hurryUp]);
 
+  // When the game is over, the scorebug shows the final. Editing it goes back to the situation.
+  const [final, setFinal] = useState<GameState | null>(null);
+  const fin = final === null ? null : finalBug(final);
+  const edit = <T,>(f: (v: T) => void) => (v: T) => { setFinal(null); f(v); };
   const scorebug = (
     <Scorebug
-      situation={bugSituation(s)} set={set} clock={clock}
-      margin={-s.trail} marginOptions={SCORE_OPTIONS} onMargin={(m) => switchScore(m, s, (m) => set({ trail: -m }))}
+      situation={fin?.situation ?? bugSituation(s)} set={edit(set)}
+      clock={fin ? { text: "0:00", error: null, onType: edit(clock.onType) } : clock} final={fin?.final}
+      margin={fin?.margin ?? -s.trail} marginOptions={SCORE_OPTIONS} onMargin={edit((m: number) => switchScore(m, s, (m) => set({ trail: -m })))}
     />
   );
 
@@ -71,7 +76,7 @@ export default function TrailingPanel() {
         <Alert color="gray">Enter the clock as M:SS, for example 1:45.</Alert>
       ) : (
         <Stack gap="lg">
-          <Trainer key={deal} onNewDrive={randomize} game={sim.value} pending={sim.pending} onChange={(g) => switchScore(g.margin, sharedFromGame(g), (m) => set({ ...sharedFromGame(g), trail: -m }))} cfg={cfg} />
+          <Trainer key={deal} onNewDrive={randomize} onFinal={setFinal} game={sim.value} pending={sim.pending} onChange={(g) => switchScore(g.margin, sharedFromGame(g), (m) => set({ ...sharedFromGame(g), trail: -m }))} cfg={cfg} />
 
           <Group justify="space-between" align="baseline">
             <Title order={2}>Rules of thumb</Title>

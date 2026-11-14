@@ -88,7 +88,7 @@ function useWinProbability(g: GameState, cfg: SimConfig) {
   }, [key]);
 }
 
-export default function Trainer({ game, pending = false, onChange, onNewDrive, cfg = DEFAULT_SIM }: {
+export default function Trainer({ game, pending = false, onChange, onNewDrive, onFinal, cfg = DEFAULT_SIM }: {
   /** The situation from the form. You have the ball. */
   game: GameState;
   /** True while the form has changed and `game` hasn't caught up yet: calls wait until it has. */
@@ -97,6 +97,8 @@ export default function Trainer({ game, pending = false, onChange, onNewDrive, c
   onChange: (g: GameState) => void;
   /** Deals a new situation, for the button when the game is over. */
   onNewDrive?: () => void;
+  /** Told the game's final state when it ends, and null when it isn't over (after an undo, say). */
+  onFinal?: (g: GameState | null) => void;
   cfg?: SimConfig;
 }) {
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -110,7 +112,7 @@ export default function Trainer({ game, pending = false, onChange, onNewDrive, c
   const available = availableCalls(game);
   // What happened after your drive: the other team's possessions, then either the final result or the
   // situation when the ball comes back to you.
-  const [finish, setFinish] = useState<{ lines: string[]; result: number | null; back: GameState | null } | null>(null);
+  const [finish, setFinish] = useState<{ lines: string[]; result: number | null; back: GameState | null; end: GameState | null } | null>(null);
   // The last play's result, flashed on screen for a moment.
   const [flash, setFlash] = useState<(ReturnType<typeof playFlash> & { id: number }) | null>(null);
   useEffect(() => {
@@ -119,6 +121,13 @@ export default function Trainer({ game, pending = false, onChange, onNewDrive, c
     return () => clearTimeout(t);
   }, [flash]);
   const gameOver = ended != null && (ended.after.over || finish?.result != null);
+  // The final, for the scorebug: where the game ended, on your drive or in the play-out after it.
+  const finalState = !ended ? null : ended.after.over ? ended.after : finish?.end ?? null;
+  useEffect(() => {
+    onFinal?.(finalState);
+    return () => onFinal?.(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finalState]);
   const finalResult = finish?.result ?? wp;
 
   function call(c: PlayCall) {
@@ -155,8 +164,8 @@ export default function Trainer({ game, pending = false, onChange, onNewDrive, c
     if (!ended) return;
     const { lines: plays, state: s } = playUntilYourBall(ended.after, seededRng((Math.random() * 2 ** 32) >>> 0), cfg);
     const lines = ["Their ball:", ...plays];
-    if (s.over) setFinish({ lines, result: s.margin > 0 ? 1 : s.margin < 0 ? 0 : 0.5, back: null });
-    else setFinish({ lines, result: null, back: s });
+    if (s.over) setFinish({ lines, result: s.margin > 0 ? 1 : s.margin < 0 ? 0 : 0.5, back: null, end: { ...s, clock: 0 } });
+    else setFinish({ lines, result: null, back: s, end: null });
   }
 
   /** Your ball again: put the new situation on the scorebug and call the plays from there. */
