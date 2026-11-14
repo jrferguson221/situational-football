@@ -22,8 +22,8 @@ interface Entry {
   driveEnded: string | null;
 }
 
-/** How long a play's result stays on screen, in milliseconds. */
-export const FLASH_MS = 2600;
+/** How long a play's result stays on screen, in milliseconds. The animation in styles.css runs this long too. */
+export const FLASH_MS = 2000;
 
 type FlashTone = "good" | "bad" | "neutral";
 
@@ -159,14 +159,16 @@ export default function Trainer({ game, pending = false, onChange, cfg = DEFAULT
 
   return (
     <Stack component="section" gap="md" aria-label="Play caller" className="trainer">
-      {/* Over the top of the trainer, just under the scorebug the page scrolls back to. */}
+      {/* Across the whole screen: a tinted wash with a band that sweeps through carrying the result. */}
       {flash && (
         <div
           key={`flash-${flash.id}`} className={`play-flash ${flash.tone}`} role="status" aria-live="polite"
           onClick={() => setFlash(null)}
         >
-          <div className="play-flash-head">{flash.headline}</div>
-          {flash.detail && <div className="play-flash-detail">{flash.detail}</div>}
+          <div className="play-flash-band">
+            <div className="play-flash-head">{flash.headline}</div>
+            {flash.detail && <div className="play-flash-detail">{flash.detail}</div>}
+          </div>
         </div>
       )}
       <WinMeter wp={wp} prev={prevWp} />

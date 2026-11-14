@@ -999,40 +999,61 @@ nav[aria-label="Guide sections"] .mantine-List-item {
   & > .eyebrow:first-child { background: var(--mantine-color-red-8); }
 }
 
-/* ---------- The trainer: a play's result, flashed just under the scorebug ---------- */
+/* ---------- The trainer: a play's result, flashed across the whole screen ---------- */
 
 .scorebug { scroll-margin-top: var(--mantine-spacing-sm); }
 
-.trainer { position: relative; }
+/* A wash of the result's color over the page, and a broadcast band that sweeps in from the left, holds,
+   and sweeps out to the right: green for a first down or a score, red for a loss, blue otherwise. */
 .play-flash {
-  position: absolute; z-index: 30; top: rem(6px); left: 50%; transform: translateX(-50%);
-  width: min(rem(560px), calc(100vw - 2 * var(--mantine-spacing-sm)));
-  padding: rem(12px) rem(18px);
-  border-radius: 3px;
-  background: var(--mantine-color-body);
-  border: 2px solid var(--mantine-color-blue-7);
-  box-shadow: var(--mantine-shadow-lg);
-  text-align: center;
+  --flash: var(--mantine-color-blue-7);
+  &.good { --flash: var(--mantine-color-green-7); }
+  &.bad { --flash: var(--mantine-color-red-8); }
+  position: fixed; inset: 0; z-index: 400;
+  display: grid; place-items: center;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--flash) 22%, rgba(10, 14, 20, 0.35));
   cursor: pointer;
-  animation: play-flash 2600ms ease both;
-  &.good { border-color: var(--mantine-color-green-7); }
-  &.bad { border-color: var(--mantine-color-red-8); }
+  animation: play-flash-wash 2000ms ease both;
+}
+.play-flash-band {
+  width: 100%;
+  padding: clamp(rem(16px), 4vw, rem(36px)) var(--mantine-spacing-md);
+  background: var(--flash);
+  color: #fff;
+  text-align: center;
+  box-shadow: 0 0 0 rem(4px) rgba(255, 255, 255, 0.9), 0 rem(18px) rem(48px) rgba(0, 0, 0, 0.35);
+  transform: skewY(-4deg);
+  animation: play-flash-sweep 2000ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 .play-flash-head {
-  font-family: var(--mantine-font-family-headings); font-weight: 700; font-size: rem(26px); line-height: 1.15;
-  text-transform: uppercase; letter-spacing: 0.03em;
-  .good & { color: light-dark(var(--mantine-color-green-8), var(--mantine-color-green-4)); }
-  .bad & { color: light-dark(var(--mantine-color-red-8), var(--mantine-color-red-4)); }
+  font-family: var(--mantine-font-family-headings); font-weight: 700;
+  font-size: clamp(rem(30px), 7vw, rem(76px)); line-height: 1.02;
+  text-transform: uppercase; letter-spacing: 0.02em;
+  text-wrap: balance;
+  transform: skewY(4deg);
 }
-.play-flash-detail { margin-top: rem(2px); font-size: rem(15px); color: var(--mantine-color-dimmed); }
+.play-flash-detail {
+  margin-top: rem(6px);
+  font-family: var(--mantine-font-family-headings); font-weight: 600;
+  font-size: clamp(rem(16px), 2.6vw, rem(26px)); letter-spacing: 0.06em; text-transform: uppercase;
+  opacity: 0.92;
+  transform: skewY(4deg);
+}
 
-/* In with a pop, a hold, then out. */
-@keyframes play-flash {
-  0% { opacity: 0; transform: translate(-50%, -8px) scale(0.96); }
-  8% { opacity: 1; transform: translate(-50%, 0) scale(1); }
-  85% { opacity: 1; transform: translate(-50%, 0) scale(1); }
-  100% { opacity: 0; transform: translate(-50%, -4px) scale(1); }
+@keyframes play-flash-wash {
+  0% { opacity: 0; }
+  10% { opacity: 1; }
+  82% { opacity: 1; }
+  100% { opacity: 0; }
 }
+@keyframes play-flash-sweep {
+  0% { transform: translateX(-105%) skewY(-4deg); }
+  16% { transform: translateX(0) skewY(-4deg); }
+  80% { transform: translateX(0) skewY(-4deg); }
+  100% { transform: translateX(105%) skewY(-4deg); }
+}
+/* With reduced motion, the band fades in place instead of sweeping. */
 @media (prefers-reduced-motion: reduce) {
-  .play-flash { animation: none; }
+  .play-flash-band { animation: play-flash-wash 2000ms ease both; }
 }
