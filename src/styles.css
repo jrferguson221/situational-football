@@ -1014,7 +1014,7 @@ nav[aria-label="Guide sections"] .mantine-List-item {
   overflow: hidden;
   background: color-mix(in srgb, var(--flash) 22%, rgba(10, 14, 20, 0.35));
   cursor: pointer;
-  animation: play-flash-wash 2000ms ease both;
+  animation: play-flash-wash 3000ms ease both;
 }
 .play-flash-band {
   width: 100%;
@@ -1024,7 +1024,7 @@ nav[aria-label="Guide sections"] .mantine-List-item {
   text-align: center;
   box-shadow: 0 0 0 rem(4px) rgba(255, 255, 255, 0.9), 0 rem(18px) rem(48px) rgba(0, 0, 0, 0.35);
   transform: skewY(-4deg);
-  animation: play-flash-sweep 2000ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: play-flash-sweep 3000ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 .play-flash-head {
   font-family: var(--mantine-font-family-headings); font-weight: 700;
@@ -1043,17 +1043,17 @@ nav[aria-label="Guide sections"] .mantine-List-item {
 
 @keyframes play-flash-wash {
   0% { opacity: 0; }
-  10% { opacity: 1; }
-  82% { opacity: 1; }
+  7% { opacity: 1; }
+  88% { opacity: 1; }
   100% { opacity: 0; }
 }
 @keyframes play-flash-sweep {
   0% { transform: translateX(-105%) skewY(-4deg); }
-  16% { transform: translateX(0) skewY(-4deg); }
-  80% { transform: translateX(0) skewY(-4deg); }
+  11% { transform: translateX(0) skewY(-4deg); }
+  87% { transform: translateX(0) skewY(-4deg); }
   100% { transform: translateX(105%) skewY(-4deg); }
 }
 /* With reduced motion, the band fades in place instead of sweeping. */
 @media (prefers-reduced-motion: reduce) {
-  .play-flash-band { animation: play-flash-wash 2000ms ease both; }
+  .play-flash-band { animation: play-flash-wash 3000ms ease both; }
 }

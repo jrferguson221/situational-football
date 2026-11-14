@@ -24,7 +24,7 @@ interface Entry {
 }
 
 /** How long a play's result stays on screen, in milliseconds. The animation in styles.css runs this long too. */
-export const FLASH_MS = 2000;
+export const FLASH_MS = 3000;
 
 type FlashTone = "good" | "bad" | "neutral";
 
