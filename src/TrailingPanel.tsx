@@ -71,7 +71,7 @@ export default function TrailingPanel() {
         <Alert color="gray">Enter the clock as M:SS, for example 1:45.</Alert>
       ) : (
         <Stack gap="lg">
-          <Trainer key={deal} game={sim.value} pending={sim.pending} onChange={(g) => switchScore(g.margin, sharedFromGame(g), (m) => set({ ...sharedFromGame(g), trail: -m }))} cfg={cfg} />
+          <Trainer key={deal} onNewDrive={randomize} game={sim.value} pending={sim.pending} onChange={(g) => switchScore(g.margin, sharedFromGame(g), (m) => set({ ...sharedFromGame(g), trail: -m }))} cfg={cfg} />
 
           <Group justify="space-between" align="baseline">
             <Title order={2}>Rules of thumb</Title>

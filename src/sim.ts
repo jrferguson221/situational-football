@@ -852,6 +852,21 @@ export function policy(g: GameState, cfg: SimConfig = DEFAULT_SIM): PlayCall {
   return g.down === 1 && g.toGo >= 10 && t > 150 ? "run" : "pass-middle";
 }
 
+/**
+ * Play the other team's possessions out with the policy, until the ball comes back to you or the game ends.
+ * Returns each play's text, and the situation when it stopped.
+ */
+export function playUntilYourBall(g: GameState, r: Rng, cfg: SimConfig = DEFAULT_SIM): { lines: string[]; state: GameState } {
+  const lines: string[] = [];
+  let s = g;
+  for (let i = 0; i < 200 && !s.over && s.poss !== "you"; i++) {
+    const res = step(s, policy(s, cfg), r, cfg);
+    lines.push(res.text);
+    s = res.state;
+  }
+  return { lines, state: s };
+}
+
 /** Play the rest of the game out with both teams following the policy. 1 = you win, 0 = you lose. */
 export function playOut(
   g: GameState, r: Rng, cfg: SimConfig = DEFAULT_SIM, log?: (s: StepResult, offense: Team) => void,

@@ -68,7 +68,7 @@ export default function RunOutPanel() {
         <Alert color="gray">Enter the clock as M:SS, for example 2:05.</Alert>
       ) : (
         <Stack gap="lg">
-          <Trainer key={deal} game={sim.value} pending={sim.pending} onChange={(g) => switchScore(g.margin, sharedFromGame(g), (lead) => set({ ...sharedFromGame(g), lead }))} />
+          <Trainer key={deal} onNewDrive={randomize} game={sim.value} pending={sim.pending} onChange={(g) => switchScore(g.margin, sharedFromGame(g), (lead) => set({ ...sharedFromGame(g), lead }))} />
           <Group justify="space-between" align="baseline">
             <Title order={2}>Can you run it out?</Title>
             <GuideLink section="running-out-the-clock">How this works</GuideLink>

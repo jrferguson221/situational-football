@@ -4,10 +4,11 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { Alert, Badge, Button, Card, Group, List, Progress, SegmentedControl, SimpleGrid, Stack, Table, Text } from "@mantine/core";
 import { noGainCalls,
-  availableCalls, bestScored, biggestSwing, evaluateCalls, explain, playOut, ranked, scoreCallAtTempo, seededRng, step, winProbability, wpOf,
+  availableCalls, bestScored, biggestSwing, downAndDistance, evaluateCalls, explain, playUntilYourBall, ranked, scoreCallAtTempo, seededRng, step, winProbability, wpOf,
   DEFAULT_SIM, PLAY_CALLS, type CallValues, type Explanation, type GameState, type PlayCall, type SimConfig, type Tempo,
 } from "./sim";
 import { PLAY_CALL_IDS } from "@situational-football/schemas";
+import { formatClock } from "./time";
 import { ReasonText } from "./ReadMore";
 import { PlayLog } from "./fields";
 
@@ -87,13 +88,15 @@ function useWinProbability(g: GameState, cfg: SimConfig) {
   }, [key]);
 }
 
-export default function Trainer({ game, pending = false, onChange, cfg = DEFAULT_SIM }: {
+export default function Trainer({ game, pending = false, onChange, onNewDrive, cfg = DEFAULT_SIM }: {
   /** The situation from the form. You have the ball. */
   game: GameState;
   /** True while the form has changed and `game` hasn't caught up yet: calls wait until it has. */
   pending?: boolean;
   /** Called with the new situation after a play, or the old one on undo. */
   onChange: (g: GameState) => void;
+  /** Deals a new situation, for the button when the game is over. */
+  onNewDrive?: () => void;
   cfg?: SimConfig;
 }) {
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -105,7 +108,9 @@ export default function Trainer({ game, pending = false, onChange, cfg = DEFAULT
   const { wp, values } = useWinProbability(current, cfg);
   const prevWp = last ? bestScored(last.values).wp : null;
   const available = availableCalls(game);
-  const [finish, setFinish] = useState<{ lines: string[]; result: number } | null>(null);
+  // What happened after your drive: the other team's possessions, then either the final result or the
+  // situation when the ball comes back to you.
+  const [finish, setFinish] = useState<{ lines: string[]; result: number | null; back: GameState | null } | null>(null);
   // The last play's result, flashed on screen for a moment.
   const [flash, setFlash] = useState<(ReturnType<typeof playFlash> & { id: number }) | null>(null);
   useEffect(() => {
@@ -113,7 +118,7 @@ export default function Trainer({ game, pending = false, onChange, cfg = DEFAULT
     const t = setTimeout(() => setFlash(null), FLASH_MS);
     return () => clearTimeout(t);
   }, [flash]);
-  const gameOver = ended != null && (ended.after.over || finish != null);
+  const gameOver = ended != null && (ended.after.over || finish?.result != null);
   const finalResult = finish?.result ?? wp;
 
   function call(c: PlayCall) {
@@ -145,16 +150,21 @@ export default function Trainer({ game, pending = false, onChange, cfg = DEFAULT
     setFinish(null);
   }
 
+  /** Play the other team's possession out, and stop when the ball comes back to you or the game ends. */
   function playItOut() {
     if (!ended) return;
-    const lines: string[] = [];
-    let offense: string | null = null;
-    const result = playOut(ended.after, seededRng((Math.random() * 2 ** 32) >>> 0), cfg, (s, team) => {
-      if (team !== offense) lines.push(team === "you" ? "Your ball:" : "Their ball:");
-      offense = team;
-      lines.push(s.text);
-    });
-    setFinish({ lines, result });
+    const { lines: plays, state: s } = playUntilYourBall(ended.after, seededRng((Math.random() * 2 ** 32) >>> 0), cfg);
+    const lines = ["Their ball:", ...plays];
+    if (s.over) setFinish({ lines, result: s.margin > 0 ? 1 : s.margin < 0 ? 0 : 0.5, back: null });
+    else setFinish({ lines, result: null, back: s });
+  }
+
+  /** Your ball again: put the new situation on the scorebug and call the plays from there. */
+  function takeOver(back: GameState) {
+    setEntries([]);
+    setFinish(null);
+    onChange(back);
+    document.querySelector("section.scorebug")?.scrollIntoView({ block: "start" });
   }
 
   return (
@@ -188,9 +198,20 @@ export default function Trainer({ game, pending = false, onChange, cfg = DEFAULT
           ) : (
             !ended.after.over && <Text>The opponent has the ball. See one way the rest of the game could go.</Text>
           )}
-          {!ended.after.over && (
-            <Group mt="md"><Button onClick={playItOut}>{finish ? "Play it out again" : "Play it out"}</Button></Group>
+          {finish?.back && (
+            <Text mt="sm" fw={700}>
+              Your ball: {downAndDistance(finish.back)}, {formatClock(finish.back.clock)} left,{" "}
+              {finish.back.margin > 0 ? `up ${finish.back.margin}` : finish.back.margin < 0 ? `down ${-finish.back.margin}` : "tied"}.
+            </Text>
           )}
+          {gameOver && <Text mt="sm" className="verdict">{resultText(finish?.result ?? (ended.after.margin > 0 ? 1 : ended.after.margin < 0 ? 0 : 0.5))}</Text>}
+          <Group mt="md">
+            {finish?.back && <Button onClick={() => takeOver(finish.back!)}>Take over</Button>}
+            {!ended.after.over && (
+              <Button variant={finish?.back || (gameOver && onNewDrive) ? "default" : "filled"} onClick={playItOut}>{finish ? "Play it out again" : "Play it out"}</Button>
+            )}
+            {gameOver && onNewDrive && <Button onClick={onNewDrive}>New Drive</Button>}
+          </Group>
         </Card>
       ) : (
         <Card>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { availableCalls, evaluateCalls, policy, scoreCallAtTempo, seededRng, step, wpOf, type GameState } from "../src/sim";
+import { availableCalls, evaluateCalls, playUntilYourBall, policy, scoreCallAtTempo, seededRng, step, wpOf, type GameState } from "../src/sim";
 
 // Down 2 at the opponent's 20, 1:30 left and the clock running: a field goal wins.
 const inRange: GameState = { clock: 90, running: true, poss: "you", down: 1, toGo: 10, ytg: 20, margin: -2, timeouts: { you: 2, opp: 1 }, over: false };
@@ -69,5 +69,22 @@ describe("needing a touchdown at the goal line late", () => {
     expect(policy(at(8, 2))).toBe("pass-middle");
     expect(policy(at(14, 2))).toBe("pass-play-action");
     expect(policy(at(25, 2))).toBe("pass-deep");
+  });
+});
+
+describe("playing it out after your drive", () => {
+  it("stops when the ball comes back to you, or when the game ends", () => {
+    // Your punt from midfield, up 3 with 4:00 left: they get the ball.
+    const afterPunt: GameState = { clock: 240, running: false, poss: "opp", down: 1, toGo: 10, ytg: 80, margin: 3, timeouts: { you: 2, opp: 2 }, over: false };
+    let back = 0, over = 0;
+    for (let seed = 1; seed <= 200; seed++) {
+      const { lines, state } = playUntilYourBall(afterPunt, seededRng(seed));
+      expect(lines.length).toBeGreaterThan(0);
+      if (state.over) over++;
+      else { expect(state.poss).toBe("you"); back++; }
+    }
+    // With 4:00 left, sometimes you get it back, and sometimes they run out the clock or score late.
+    expect(back).toBeGreaterThan(0);
+    expect(over).toBeGreaterThan(0);
   });
 });
