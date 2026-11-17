@@ -55,14 +55,15 @@ export default function TrailingPanel() {
   const sim = useDebouncedByKey(game, `${JSON.stringify(game)}/${hurryUp}`);
   const cfg = useMemo(() => ({ ...DEFAULT_SIM, hurryUp }), [hurryUp]);
 
-  // When the game is over, the scorebug shows the final. Editing it goes back to the situation.
+  // Once your drive ends, the scorebug shows the game from there: their ball, your ball back, or the
+  // final. Editing it goes back to setting up a situation.
   const [final, setFinal] = useState<GameState | null>(null);
   const fin = final === null ? null : finalBug(final);
   const edit = <T,>(f: (v: T) => void) => (v: T) => { setFinal(null); f(v); };
   const scorebug = (
     <Scorebug
       situation={fin?.situation ?? bugSituation(s)} set={edit(set)}
-      clock={fin ? { text: "0:00", error: null, onType: edit(clock.onType) } : clock} final={fin?.final}
+      clock={fin ? { text: fin.clockText, error: null, onType: edit(clock.onType) } : clock} final={fin?.final}
       margin={fin?.margin ?? -s.trail} marginOptions={SCORE_OPTIONS} onMargin={edit((m: number) => switchScore(m, s, (m) => set({ trail: -m })))}
     />
   );

@@ -15,7 +15,7 @@ it("maps the field onto the strip between two 10-yard end zones", () => {
   expect(stripPercent(100)).toBeCloseTo(100 - 100 / 12);
 });
 
-describe("the final", () => {
+describe("the scorebug after your drive", () => {
   const end = { clock: 0, running: false, down: 2 as const, toGo: 7, margin: -3, timeouts: { you: 0, opp: 1 }, over: true };
   it("puts the ball where it ended, from your end of the field, and says whose it was", () => {
     // Their ball 67 yards from the goal they attack is at their own 33: 33 yards from the goal you attack.
@@ -26,5 +26,13 @@ describe("the final", () => {
     const yours = finalBug({ ...end, poss: "you", ytg: 65, margin: 3 });
     expect(yours.situation.ball).toMatchObject({ side: "own", yardLine: 35 });
     expect(yours.final.oppBall).toBe(false);
+  });
+
+  it("shows 0:00 and Final when the game is over, and the clock as it stands after a punt", () => {
+    expect(finalBug({ ...end, poss: "opp", ytg: 67, clock: 4 })).toMatchObject({ clockText: "0:00", final: { caption: "Final" } });
+    // Your punt at 0:20 from your 16: their ball at their 40, 0:16 left, the clock stopped.
+    const punted = finalBug({ ...end, poss: "opp", ytg: 60, clock: 16, over: false, margin: 7 });
+    expect(punted).toMatchObject({ clockText: "0:16", margin: 7, final: { oppBall: true, caption: "Clock stopped" } });
+    expect(punted.situation.ball).toMatchObject({ side: "opp", yardLine: 40 });
   });
 });

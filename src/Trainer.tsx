@@ -97,7 +97,10 @@ export default function Trainer({ game, pending = false, onChange, onNewDrive, o
   onChange: (g: GameState) => void;
   /** Deals a new situation, for the button when the game is over. */
   onNewDrive?: () => void;
-  /** Told the game's final state when it ends, and null when it isn't over (after an undo, say). */
+  /**
+   * Told the situation once your drive has ended, for the scorebug: right after the drive, then where the
+   * play-out left it (your ball again, or the final). Null while your drive is on (after an undo, say).
+   */
   onFinal?: (g: GameState | null) => void;
   cfg?: SimConfig;
 }) {
@@ -121,8 +124,9 @@ export default function Trainer({ game, pending = false, onChange, onNewDrive, o
     return () => clearTimeout(t);
   }, [flash]);
   const gameOver = ended != null && (ended.after.over || finish?.result != null);
-  // The final, for the scorebug: where the game ended, on your drive or in the play-out after it.
-  const finalState = !ended ? null : ended.after.over ? ended.after : finish?.end ?? null;
+  // For the scorebug once your drive has ended: the situation right after it, then where the play-out
+  // left it, your ball again or the final.
+  const finalState = !ended ? null : ended.after.over ? ended.after : finish?.end ?? finish?.back ?? ended.after;
   useEffect(() => {
     onFinal?.(finalState);
     return () => onFinal?.(null);

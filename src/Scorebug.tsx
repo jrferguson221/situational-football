@@ -48,20 +48,25 @@ export interface ScorebugProps {
   /** Mode settings, shown in the strip under the bug: BugSelects. */
   settings?: ReactNode;
   /** The game is over: the bug shows the final, with the ball where it ended up and whose it was. */
-  final?: { oppBall: boolean } | undefined;
+  final?: { oppBall: boolean; caption: string } | undefined;
 }
 
 /**
- * The end of a game as the bug shows it: the clock at 0:00, the final score, and the ball's spot from your
- * end of the field, whichever team had it.
+ * The game after your drive, as the bug shows it: the score, the clock as it stands (0:00 and "Final" when
+ * the game is over), and the ball's spot from your end of the field, with the football on whichever team
+ * has it. The trainer shows this once your drive ends, until you set up a new situation.
  */
-export function finalBug(g: GameState): { situation: BugSituation; margin: number; final: { oppBall: boolean } } {
+export function finalBug(g: GameState): {
+  situation: BugSituation; margin: number; clockText: string; final: { oppBall: boolean; caption: string };
+} {
   const fromYours = g.poss === "you" ? g.ytg : 100 - g.ytg;
   const ytg = Math.min(99, Math.max(1, fromYours));
+  const clock = g.over ? 0 : g.clock;
   return {
     situation: { timeouts: g.timeouts.you, oppTimeouts: g.timeouts.opp, ball: { down: g.down, toGo: 0, ...spotFrom(ytg) } },
     margin: g.margin,
-    final: { oppBall: g.poss !== "you" },
+    clockText: `${Math.floor(clock / 60)}:${String(clock % 60).padStart(2, "0")}`,
+    final: { oppBall: g.poss !== "you", caption: g.over ? "Final" : g.running ? "Clock running" : "Clock stopped" },
   };
 }
 
@@ -226,7 +231,7 @@ export default function Scorebug({
   const running = s.running;
 
   return (
-    <section className={`scorebug${marks === null ? " no-ball" : ""}${final ? " final" : ""}`} aria-label={final ? "Final" : "Situation"}>
+    <section className={`scorebug${marks === null ? " no-ball" : ""}${final ? " final" : ""}`} aria-label={final?.caption === "Final" ? "Final" : "Situation"}>
       <div className="sb-bar">
         <div className="sb-team you">
           <span className="sb-name">
@@ -262,7 +267,7 @@ export default function Scorebug({
             {clock.error !== null ? (
               <span className="sb-cap sb-clock-error">Enter M:SS</span>
             ) : final ? (
-              <span className="sb-cap sb-final">Final</span>
+              <span className={final.caption === "Final" ? "sb-cap sb-final" : "sb-cap"}>{final.caption}</span>
             ) : running === undefined ? (
               <span className="sb-cap">{clockNote}</span>
             ) : (
