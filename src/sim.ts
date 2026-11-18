@@ -1185,7 +1185,23 @@ export function whyNot(g: GameState, call: PlayCall): Reason | null {
  */
 const wastesResource = (g: GameState, call: PlayCall) => !g.running && (call === "timeout" || call === "spike");
 
-export function explain(g: GameState, chosen: PlayCall, values: CallValues, cfg: SimConfig = DEFAULT_SIM): Explanation {
+/**
+ * The smallest gap between two calls' estimates that's more than the simulation's own noise, for `games`
+ * simulated per call: twice the standard error of the difference between two win probabilities near `p`
+ * (at least CLOSE). At 3,000 games and 30% that's about 2.4 points; at 20,000 it would be 0.9, under CLOSE.
+ */
+export function noiseMargin(p: number, games: number): number {
+  return Math.max(CLOSE, 2 * Math.sqrt((2 * p * (1 - p)) / games));
+}
+
+/**
+ * The verdict on a call. A call is only "worse" when it trails the best by more than `closeWithin`: by
+ * default CLOSE, or the simulation's noise margin when the values are estimates that can't tell a smaller
+ * gap apart (see `noiseMargin`).
+ */
+export function explain(
+  g: GameState, chosen: PlayCall, values: CallValues, cfg: SimConfig = DEFAULT_SIM, closeWithin: number = CLOSE,
+): Explanation {
   const { call: best, wp: top } = bestScored(values);
   const mine = wpOf(values, chosen);
   const wasted = wastesResource(g, chosen);
@@ -1203,7 +1219,7 @@ export function explain(g: GameState, chosen: PlayCall, values: CallValues, cfg:
       reasons,
     };
   }
-  if (top - mine <= CLOSE) {
+  if (top - mine <= closeWithin) {
     return {
       verdict: "close",
       headline: `Close: ${PLAY_CALLS[best]} was about as good (${pct(top)} vs ${pct(mine)})`,

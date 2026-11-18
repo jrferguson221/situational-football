@@ -4,7 +4,7 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { Alert, Badge, Button, Card, Group, List, Progress, SegmentedControl, SimpleGrid, Stack, Table, Text } from "@mantine/core";
 import { noGainCalls,
-  availableCalls, bestScored, biggestSwing, downAndDistance, evaluateCalls, explain, playUntilYourBall, ranked, scoreCallAtTempo, seededRng, step, winProbability, wpOf,
+  availableCalls, bestScored, biggestSwing, noiseMargin, downAndDistance, evaluateCalls, explain, playUntilYourBall, ranked, scoreCallAtTempo, seededRng, step, winProbability, wpOf,
   DEFAULT_SIM, PLAY_CALLS, type CallValues, type Explanation, type GameState, type PlayCall, type SimConfig, type Tempo,
 } from "./sim";
 import { PLAY_CALL_IDS } from "@situational-football/schemas";
@@ -79,12 +79,25 @@ const CALL_ORDER: readonly PlayCall[] = PLAY_CALL_IDS;
 
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
+/** Games simulated per call for the live win-probability meter and the first look at every call. */
+export const TRAINER_GAMES = 500;
+
+/**
+ * Grading a call takes more precision. At 500 games a call's estimate can be off by up to 4 points, enough
+ * to call a near-tie a clear mistake; at 3,000 the worst case across late situations is under 2. So when you
+ * call a play, your call and every call within REFINE_WINDOW of the leader are re-scored at GRADE_GAMES
+ * (calls further back are clearly worse either way). Scoring every call at 3,000 would freeze a slow phone
+ * for seconds after each tap.
+ */
+export const GRADE_GAMES = 3000;
+export const REFINE_WINDOW = 0.04;
+
 /** Your win probability, assuming the best call now and the rule-of-thumb policy after. */
 function useWinProbability(g: GameState, cfg: SimConfig) {
   const key = JSON.stringify(g) + cfg.hurryUp;
   return useMemo(() => {
     if (g.over || g.poss !== "you") return { wp: winProbability(g, 1500, cfg), values: null };
-    const values = evaluateCalls(g, 500, cfg);
+    const values = evaluateCalls(g, TRAINER_GAMES, cfg);
     return { wp: bestScored(values).wp, values };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
@@ -141,8 +154,15 @@ export default function Trainer({ game, pending = false, onChange, onNewDrive, o
     // The pace only matters with the clock running. Your call is graded at the pace you chose; the other
     // calls keep the model's own.
     const pace: Tempo = game.running ? tempo : "auto";
-    const mine = pace === "auto" ? null : scoreCallAtTempo(game, c, pace, 500, cfg);
-    const swap = (v: CallValues[number]) => (mine !== null && v.call === c ? { ...v, wp: mine } : v);
+    // Re-score the close calls, and yours at the pace you chose, precisely enough to grade them.
+    const lead = bestScored(values).wp;
+    const precise = new Map<PlayCall, number>();
+    for (const v of values) {
+      if (v.call === c || lead - v.wp <= REFINE_WINDOW) {
+        precise.set(v.call, scoreCallAtTempo(game, v.call, v.call === c ? pace : "auto", GRADE_GAMES, cfg));
+      }
+    }
+    const swap = (v: CallValues[number]) => ({ ...v, wp: precise.get(v.call) ?? v.wp });
     const graded: CallValues = [swap(values[0]), ...values.slice(1).map(swap)];
     const res = step(game, c, seededRng((Math.random() * 2 ** 32) >>> 0), cfg, undefined, pace);
     if (res.twoMinuteWarning) {
@@ -159,7 +179,8 @@ export default function Trainer({ game, pending = false, onChange, onNewDrive, o
     }
     const entry: Entry = {
       before: game, after: res.state, call: c, text: res.text, values: graded,
-      explanation: explain(game, c, graded, cfg), driveEnded: res.driveEnded ?? null,
+      // A call only counts as a mistake when it trails by more than the grading simulation can resolve.
+      explanation: explain(game, c, graded, cfg, noiseMargin(bestScored(graded).wp, GRADE_GAMES)), driveEnded: res.driveEnded ?? null,
     };
     setEntries([...entries, entry]);
     setFinish(null);
