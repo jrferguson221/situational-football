@@ -21,6 +21,8 @@ interface Entry {
   explanation: Explanation;
   /** Set when this call ended the drive, e.g. "Touchdown". */
   driveEnded: string | null;
+  /** The clock reached the two-minute warning before the snap: no play ran, and nothing was graded. */
+  warning?: true;
 }
 
 /** How long a play's result stays on screen, in milliseconds. The animation in styles.css runs this long too. */
@@ -143,6 +145,18 @@ export default function Trainer({ game, pending = false, onChange, onNewDrive, o
     const swap = (v: CallValues[number]) => (mine !== null && v.call === c ? { ...v, wp: mine } : v);
     const graded: CallValues = [swap(values[0]), ...values.slice(1).map(swap)];
     const res = step(game, c, seededRng((Math.random() * 2 ** 32) >>> 0), cfg, undefined, pace);
+    if (res.twoMinuteWarning) {
+      // The clock stopped at 2:00 before the snap: no play ran, so there's nothing to grade. Call again.
+      setEntries([...entries, {
+        before: game, after: res.state, call: c, text: "Two-minute warning: the clock stopped at 2:00 before the snap.",
+        values, explanation: { verdict: "best", headline: "Two-minute warning", reasons: [] }, driveEnded: null, warning: true,
+      }]);
+      setFinish(null);
+      onChange(res.state);
+      setFlash({ id: entries.length + 1, headline: "Two-minute warning", detail: "Clock stopped at 2:00. Call your play.", tone: "neutral" });
+      document.querySelector("section.scorebug")?.scrollIntoView({ block: "start" });
+      return;
+    }
     const entry: Entry = {
       before: game, after: res.state, call: c, text: res.text, values: graded,
       explanation: explain(game, c, graded, cfg), driveEnded: res.driveEnded ?? null,
@@ -253,10 +267,12 @@ export default function Trainer({ game, pending = false, onChange, onNewDrive, o
         </Card>
       )}
 
-      {gameOver && <Recap entries={entries} driveEndWp={wp} result={finalResult} />}
+      {gameOver && <Recap entries={entries.filter((e) => !e.warning)} driveEndWp={wp} result={finalResult} />}
 
       <PlayLog
-        summaries={entries.map((e) => `${e.text} (${e.explanation.verdict === "worse" ? "better: " + PLAY_CALLS[bestScored(e.values).call] : "good call"})`)}
+        summaries={entries.map((e) => e.warning
+          ? "Two-minute warning at 2:00 (no play: call again)"
+          : `${e.text} (${e.explanation.verdict === "worse" ? "better: " + PLAY_CALLS[bestScored(e.values).call] : "good call"})`)}
         onUndo={undo}
         onReset={() => { setEntries([]); setFinish(null); }}
       />
@@ -307,6 +323,18 @@ function Explainer({ entry }: { entry: Entry }) {
   const { explanation: x, values, call } = entry;
   const [open, setOpen] = useState(false);
   const tableId = useId();
+  if (entry.warning) {
+    return (
+      <Alert color="gray" variant="outline" className="explainer" title={<span className="eyebrow">Last play</span>}>
+        <Text className="verdict">Two-minute warning</Text>
+        <Text>
+          <ReasonText
+            reason={{ text: "The clock reached 2:00 before the snap, so the warning stopped it and no play ran. Call your play from here, with the clock stopped.", section: "two-minute-warning" }}
+          />
+        </Text>
+      </Alert>
+    );
+  }
   return (
     <Alert color={VERDICT_COLOR[x.verdict]} variant="outline" className="explainer" title={<span className="eyebrow">Last play</span>}>
       <Text>{entry.text}</Text>

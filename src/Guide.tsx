@@ -356,7 +356,8 @@ function TwoMinuteWarningSection() {
     <Section id="two-minute-warning">
       <Text>
         When the clock reaches 2:00 in each half, it stops automatically, as if a free timeout had been called. If a play
-        is running, the warning comes after it ends.
+        is running, the warning comes after it ends. If the clock reaches 2:00 before the snap, the warning comes first and
+        no play runs: in the trainer you then call the play from 2:00, with the clock stopped.
       </Text>
       <List spacing={4}>
         <List.Item>

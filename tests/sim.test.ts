@@ -15,10 +15,13 @@ describe("step", () => {
     expect(r.state).toMatchObject({ clock: 59, down: 2, running: false, timeouts: { you: 2, opp: 2 } });
   });
 
-  it("the two-minute warning stops the clock before the snap", () => {
-    const r = step({ ...base, clock: 150, margin: 3 }, "kneel", rng());
-    expect(r.text).toContain("Two-minute warning before the snap");
-    expect(r.state.clock).toBe(118);
+  it("the two-minute warning stops the clock before the snap, and no play runs", () => {
+    const g = { ...base, clock: 150, margin: 3 };
+    const r = step(g, "kneel", rng());
+    expect(r.twoMinuteWarning).toBe(true);
+    expect(r.text).toBe("Two-minute warning.");
+    // Same down and spot, 2:00 on a stopped clock: the next play is called from there.
+    expect(r.state).toEqual({ ...g, clock: 120, running: false });
   });
 
   it("a timeout stops the clock right away and uses one up", () => {

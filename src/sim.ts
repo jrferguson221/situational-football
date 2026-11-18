@@ -238,6 +238,8 @@ export interface StepResult {
   text: string;
   /** Set when the team with the ball lost it or scored, e.g. "Touchdown". */
   driveEnded?: string;
+  /** Set when the clock reached the two-minute warning before the snap: it stopped at 2:00, and no play ran. */
+  twoMinuteWarning?: true;
 }
 
 /** What happened on a scrimmage play. Scenarios pass one to `step` to replay a specific result. */
@@ -691,14 +693,13 @@ export function step(
     };
   }
 
-  // Before the snap.
+  // Before the snap. If the clock reaches 2:00 first, the two-minute warning stops it there, before any play:
+  // the down stays the same, and the next play is called from 2:00 with the clock stopped.
   let t = g.clock;
-  const notes: string[] = [];
   if (g.running) {
     const after = t - preSnapBurn(g, call, cfg, tempo);
     if (t > WARNING && after <= WARNING) {
-      t = WARNING;
-      notes.push("Two-minute warning before the snap.");
+      return { state: { ...g, clock: WARNING, running: false }, text: "Two-minute warning.", twoMinuteWarning: true };
     } else if (after <= 0) {
       return { state: { ...g, clock: 0, running: false, over: true }, text: "The clock runs out before the snap." };
     } else {
@@ -713,11 +714,11 @@ export function step(
     const distance = fgDistance(g.ytg);
     if (r() < fgMakeChance(g.ytg)) {
       const s = score(g, end, 3, r);
-      return { state: s.state, text: `${notes.join(" ")} ${distance}-yard try: ${s.text}`.trim(), driveEnded: "Field goal" };
+      return { state: s.state, text: `${distance}-yard try: ${s.text}`, driveEnded: "Field goal" };
     }
     // They take over at the spot of the kick, or their 20 if that's farther back.
     const missed = changePossession(g, end, Math.min(80, 100 - (g.ytg + 7)));
-    return { state: missed, text: `${notes.join(" ")} ${distance}-yard field goal: no good.`.trim(), driveEnded: "Missed field goal" };
+    return { state: missed, text: `${distance}-yard field goal: no good.`, driveEnded: "Missed field goal" };
   }
 
   if (call === "punt") {
@@ -725,7 +726,7 @@ export function step(
     const theirYtg = 100 - puntLanding(g.ytg);
     return {
       state: changePossession(g, end, theirYtg),
-      text: `${notes.join(" ")} Punt at ${formatClock(snapClock)}. They start at their ${100 - theirYtg}.`.trim(),
+      text: `Punt at ${formatClock(snapClock)}. They start at their ${100 - theirYtg}.`,
       driveEnded: "Punt",
     };
   }
@@ -735,7 +736,7 @@ export function step(
     : rollPlay(call, r, coverageFor(g, snapClock), g.ytg, sticksRunFor(g), sticksBand(g), mustGetOut(g, snapClock),
       marginFor(g, g.poss) > 0 && snapClock <= EXPECTED_RUN_WINDOW));
   t = Math.max(0, t - play.seconds);
-  const what = `${notes.join(" ")} ${describePlay(call, play)}`.trim();
+  const what = describePlay(call, play);
 
   if (play.turnover) {
     const spot = g.ytg - play.yards;
