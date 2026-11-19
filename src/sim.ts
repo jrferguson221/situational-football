@@ -117,16 +117,51 @@ export function fgMakeChance(ytg: number): number {
   return last[1];
 }
 
-/** Whether a field goal ties or wins for the team with the ball, and they're in comfortable range. */
+/** Down 3 this close to the goal line, a team plays for the touchdown, with the tying kick in hand. */
+export const TOUCHDOWN_FIRST_YTG = 10;
+
+/**
+ * Whether the team with the ball is playing for a field goal: one ties or wins, and they're in comfortable
+ * range. Then it drains the clock and kicks last. Not when it's down 3 inside the 10, though: there a field
+ * goal only ties and the end zone is close, so it plays for the touchdown and kicks only if it has to
+ * (better by 0.4 points on average over 2,970 down-3 situations).
+ */
 function fgPlay(g: GameState): boolean {
   const m = marginFor(g, g.poss);
-  return m <= 0 && m >= -3 && g.ytg <= 35;
+  return m <= 0 && m >= -3 && g.ytg <= 35 && !(m === -3 && g.ytg <= TOUCHDOWN_FIRST_YTG);
 }
+
+/**
+ * How long a team that's tied or behind needs to finish its drive at a hurry-up pace: a base, plus a rate
+ * per yard still to go, to the end zone when it needs a touchdown or to the `fgTarget` yard line when a
+ * field goal is enough. With more time than this, stopping the clock only saves time for the other team's
+ * answer, so the team keeps its timeouts and lets the spare time run; with less, it stops the clock.
+ *
+ * Fitted by testing rules over 4,608 tied and trailing situations (every score from tied to down 8, 0:20
+ * to 3:20 left, the whole field, with and without timeouts). Against stopping the clock whenever it runs
+ * under 2:00, a team that needs a touchdown wins 24.2% instead of 22.6% on average, and up to 20 points
+ * more near the goal line; under the old rule, having a timeout made a team worse off than having none
+ * in 55 of 600 situations.
+ */
+export const DRIVE_TIME = { base: 25, perYard: 1.5, fgTarget: 20 } as const;
+
+export function driveTimeNeeded(g: GameState): number {
+  const yards = marginFor(g, g.poss) < -3 ? g.ytg : Math.max(0, g.ytg - DRIVE_TIME.fgTarget);
+  return DRIVE_TIME.base + DRIVE_TIME.perYard * yards;
+}
+
+/** A team that's tied or behind, isn't draining for a kick, and has more time than its drive needs. */
+export function hasTimeToSpare(g: GameState): boolean {
+  return marginFor(g, g.poss) <= 0 && !fgPlay(g) && g.clock > driveTimeNeeded(g);
+}
+
+/** The clock management above applies from this many seconds left. */
+const SPARE_TIME_WINDOW = 150;
 
 /**
  * Tempo is automatic. A team that's ahead, or that only needs a field goal and is in range, drains
  * the play clock. A trailing team draining for a kick snaps early enough to stop the clock and kick.
- * Everyone else hurries.
+ * A team that's tied or behind late with time to spare lets the spare time run. Everyone else hurries.
  */
 /**
  * Seconds from the end of the last play to the snap when the clock is running, for a call: a leading team
@@ -151,12 +186,23 @@ function preSnapBurn(g: GameState, call: PlayCall, cfg: SimConfig, tempo: Tempo 
     if (call === "spike") return cfg.spikeLineup;
     return g.clock <= LATE_HURRY_WINDOW ? Math.min(cfg.hurryUp, LATE_HURRY_UP) : cfg.hurryUp;
   }
-  // A kneel is for running out the clock, so it always lets the play clock run, ahead or tied.
-  if (marginFor(g, g.poss) > 0 || call === "kneel") return BURN;
+  // A kneel is for running out the clock, so it lets the play clock run, ahead or tied. The exception is a
+  // kneel to set up a field goal: that's paced like a run there (below), so there's still time for the kick.
+  if (marginFor(g, g.poss) > 0 || (call === "kneel" && !fgPlay(g))) return BURN;
+  // A kick that ties or wins: let the clock run down to 0:03 before it, or as far as one play clock allows,
+  // so it leaves the other team as little as possible. It still takes `fgRush` seconds to get the unit on.
+  if (call === "fg" && marginFor(g, g.poss) >= -3) return Math.min(BURN, Math.max(cfg.fgRush, g.clock - FG_TIMEOUT_AT));
   if (call === "fg" || call === "punt") return cfg.fgRush;
   if (call === "spike") return cfg.spikeLineup;
   if (fgPlay(g)) return Math.min(BURN, Math.max(MIN_SNAP, fgDrainBurn(g, cfg)));
-  return g.clock <= LATE_HURRY_WINDOW ? Math.min(cfg.hurryUp, LATE_HURRY_UP) : cfg.hurryUp;
+  const hurry = g.clock <= LATE_HURRY_WINDOW ? Math.min(cfg.hurryUp, LATE_HURRY_UP) : cfg.hurryUp;
+  // Late with more time than the drive needs: let the spare time run before the snap, so a score leaves
+  // the other team as little as possible.
+  if (g.clock <= SPARE_TIME_WINDOW) {
+    const spare = Math.floor(g.clock - driveTimeNeeded(g));
+    if (spare > hurry) return Math.min(BURN, spare);
+  }
+  return hurry;
 }
 
 /**
@@ -172,8 +218,28 @@ const kickFloor = (g: GameState, cfg: SimConfig) => (g.timeouts[g.poss] > 0 ? 20
  * defense most (3.5-5.7 points on average). When the kick would only tie (down 3), it saves them: there,
  * stopping the clock cost the defense 1.6 points on average.
  */
+const ANSWER_TIME_WORTH_SAVING = 20;
 function savesTimeForAnswer(g: GameState, def: Team): boolean {
-  return fgPlay(g) && marginFor(g, g.poss) > -3 && g.timeouts[def] > 0;
+  if (g.timeouts[def] === 0) return false;
+  const m = marginFor(g, g.poss);
+  if (fgPlay(g) && m > -3) {
+    // Not once an offense with no timeout has too little time left to get its kicking unit on: there the
+    // stoppage is exactly what the offense needs (it saves it a spike, or the game), and helps no one else.
+    if (g.timeouts[g.poss] === 0 && g.clock <= DEFAULT_SIM.fgRush + 1) return false;
+    // And only when the stoppages can leave enough time to answer with (20 seconds or more). The offense
+    // lets the play clock run before every snap the defense can't stop, so with too few timeouts for that,
+    // stopping the clock saves nothing and hands the offense extra plays. (Over 3,780 situations, the offense
+    // wins 70.3% against this rule, 70.9% against a defense that always stops the clock, and 71.2% against
+    // one that never does.)
+    const snaps = 4 - g.down;
+    const unstopped = Math.max(0, snaps + 1 - g.timeouts[def]);
+    return g.clock > unstopped * BURN + snaps * DRAIN_PLAY_SECONDS + ANSWER_TIME_WORTH_SAVING;
+  }
+  // The same against a team that needs a touchdown, is inside the red zone under two minutes, and has more
+  // time than it needs: it would let that time run, so the defense (ahead by a score) stops the clock to
+  // keep it for an answer. Over 3,456 such situations this cut the offense's win probability from 31.4% to
+  // 30.5%; holding the timeouts, or using them outside the red zone, did no better.
+  return m < -3 && m >= -8 && g.ytg <= RED_ZONE && g.clock <= WARNING && g.clock > driveTimeNeeded(g);
 }
 
 /**
@@ -682,10 +748,15 @@ export function step(
       } else {
         clock = Math.max(drained, Math.min(g.clock, FG_TIMEOUT_AT));
       }
-    } else if (g.running && tempo === "auto" && fgPlay(g) && g.clock <= kickFloor(g, cfg)) {
+    } else if (g.running && tempo === "auto" && fgPlay(g) && (g.down === 4 || g.clock <= kickFloor(g, cfg))) {
       // At the kick, a team that only needs the field goal lets the clock run down before taking its last
-      // stop, so the kick ends the game rather than handing the other team a few seconds.
-      clock = Math.min(g.clock, FG_TIMEOUT_AT);
+      // stop, so the kick ends the game rather than handing the other team time to answer: to 0:03, or as
+      // far as one play clock allows.
+      clock = Math.max(g.clock - BURN, Math.min(g.clock, FG_TIMEOUT_AT));
+      if (g.clock > WARNING && clock <= WARNING) {
+        clock = WARNING;
+        note = " after the two-minute warning";
+      }
     }
     return {
       state: { ...g, clock, running: false, timeouts },
@@ -789,6 +860,37 @@ function canKneelOut(g: GameState): boolean {
   }).endsGame;
 }
 
+/**
+ * 4th down for a team a field goal would put level or ahead (or that's already ahead by a field goal or
+ * less): kick, or go for it? Kicking with time left hands them the ball with time to answer; going for it
+ * keeps the ball, to kick later or run the clock out. So the rule goes for it when there's time left, the
+ * kick is long and the distance is short: with more than `minClock` seconds left, when
+ * `perSecond` x seconds (up to `clockCap`) + `perYard` x yards to the goal - `perToGo` x yards to go
+ * beats a bar. With 1:15 or more left that's 4th and 2 or less at the 5, 4 or less at the 20 and 7 or less
+ * at the 40 for a team that's tied or behind; a team that's ahead goes for it on about 4 yards more.
+ *
+ * The shape comes from the model's own kick-or-go values over 174 clock, spot and distance combinations;
+ * the bars were then set by full games, over 16,632 tied-to-down-3 situations and 12,474 leading ones.
+ */
+export const FOURTH_DOWN_GO = { minClock: 30, perSecond: 0.4, clockCap: 75, perYard: 0.45, perToGo: 3, tiedOrBehind: 26, ahead: 14 } as const;
+function goesForIt(g: GameState, bar: number): boolean {
+  const f = FOURTH_DOWN_GO;
+  return g.clock > f.minClock && f.perSecond * Math.min(g.clock, f.clockCap) + f.perYard * g.ytg - f.perToGo * g.toGo > bar;
+}
+/** Needing a touchdown this close to the goal line, on 3 yards to go or less, the rule of thumb runs. */
+export const GOAL_LINE_RUN_YTG = 5;
+/** Before a winning kick with the clock stopped, a team kneels from this close, and runs from further out. */
+export const KNEEL_BEFORE_KICK_YTG = 10;
+/** With less than this share of the time a drive needs, under a minute, the rule of thumb throws deep. */
+export const DESPERATE_SHARE = 0.5;
+
+/**
+ * The rule-of-thumb call. Its late-game rules were tested one at a time and together over 17,820 tied and
+ * trailing situations (every down, 0:08 to 2:30 left, the whole field) and 5,940 leading ones. Each was
+ * kept only if the team following it won more often against a team that didn't; together they raise that
+ * team's average win probability by about 2 points over the rules before them. Late drives still score as
+ * often as real ones did (scripts/calibrate/drives.ts).
+ */
 export function policy(g: GameState, cfg: SimConfig = DEFAULT_SIM): PlayCall {
   const m = marginFor(g, g.poss);
   const to = g.timeouts[g.poss];
@@ -796,7 +898,12 @@ export function policy(g: GameState, cfg: SimConfig = DEFAULT_SIM): PlayCall {
 
   if (m > 0) {
     if (canKneelOut(g)) return "kneel";
-    if (g.down === 4) return g.ytg <= 35 ? "fg" : g.ytg >= PUNT_MIN_YTG ? "punt" : "run";
+    if (g.down === 4) {
+      // Ahead by a field goal or less at midfield or closer, on a short enough 4th down: go for it. A first
+      // down all but ends the game, which is worth more than the kick or the punt (see FOURTH_DOWN_GO).
+      if (m <= 3 && g.ytg <= 50 && goesForIt(g, FOURTH_DOWN_GO.ahead)) return g.toGo <= 2 ? "run" : "pass-middle";
+      return g.ytg <= 35 ? "fg" : g.ytg >= PUNT_MIN_YTG ? "punt" : "run";
+    }
     return "run";
   }
 
@@ -805,21 +912,63 @@ export function policy(g: GameState, cfg: SimConfig = DEFAULT_SIM): PlayCall {
   // Not on 4th down: that hands them the ball in range. The 4th-down rule below punts instead.
   if (m === 0 && g.ytg > 60 && t <= TIED_KNEEL_CLOCK && g.down < 4) return "kneel";
 
+  const hurry = t <= LATE_HURRY_WINDOW ? Math.min(cfg.hurryUp, LATE_HURRY_UP) : cfg.hurryUp;
+
   if (fgPlay(g)) {
     const floor = kickFloor(g, cfg);
-    if (g.down === 4 || t <= floor) return g.running && to > 0 ? "timeout" : "fg";
+    // 4th and short with time left: kicking now leaves them time to answer, so go for it and kick later.
+    if (g.down === 4 && goesForIt(g, FOURTH_DOWN_GO.tiedOrBehind)) return g.toGo <= 2 ? "run" : "pass-middle";
+    if (g.down === 4 || t <= floor) {
+      if (!g.running) {
+        if (g.down <= 3) {
+          // Downs to spare with the clock stopped: use the time before the kick instead of leaving it for
+          // them. Down 3 with a timeout, that's a shot at the touchdown. Otherwise a kneel from chip-shot
+          // range, or a run from further out (a shorter kick is worth the small risk), if the kick still fits
+          // after it: a timeout at 0:03, or the time to get the unit on.
+          if (m === -3 && to > 0 && t > 9) return g.ytg <= 10 ? "pass-middle" : g.ytg <= 16 ? "pass-play-action" : "pass-deep";
+          if (g.ytg <= KNEEL_BEFORE_KICK_YTG) {
+            if (to > 0 ? t > FG_TIMEOUT_AT + 3 : t >= cfg.fgRush + 4) return "kneel";
+          } else if (to > 0 ? t > FG_TIMEOUT_AT + DRAIN_PLAY_SECONDS + 1 : t >= cfg.fgRush + DRAIN_PLAY_SECONDS + 2) {
+            return "run";
+          }
+        }
+        return "fg";
+      }
+      if (to > 0) return "timeout";
+      // No timeout and the clock running: the field-goal unit needs `fgRush` seconds to get on. With less
+      // than that, spike it to stop the clock, then kick; on 4th down, all that's left is to run a play.
+      if (t <= cfg.fgRush + 1 && g.down <= 3 && t > cfg.spikeLineup + 1) return "spike";
+      if (t <= cfg.fgRush) return g.ytg <= 3 ? "run" : "pass-middle";
+      return "fg";
+    }
     return "run";
   }
 
-  // Time for one last play, a field goal ties or wins, and it's within reach (a 65-yarder at most): kick,
-  // stopping the clock first if it's running.
-  // Without a timeout, a play that ends in bounds needs a spike before the kick: a play, the lineup and a
-  // second. With less time than that, a play only helps if it stops the clock itself, so kick now.
-  if (m <= 0 && m >= -3 && g.ytg <= LAST_PLAY_FG_YTG && t <= (to > 0 ? 12 : cfg.spikeLineup + DRAIN_PLAY_SECONDS + 1)) {
-    if (!g.running) return "fg";
-    if (to > 0) return "timeout";
-    if (g.down <= 3 && t > cfg.spikeLineup + 1) return "spike";
-    return "fg";
+  // A field goal ties or wins and it's within reach (a 65-yarder at most), with time for one last play at
+  // most: kick. With the clock stopped, that's 12 seconds with a timeout, or enough for a play and a spike
+  // without one. With it running: a timeout first; without one, a spike if the unit can't get on in time,
+  // and the kick itself (letting the clock run down to it) once a play, a spike and a kick no longer fit.
+  if (m >= -3 && g.ytg <= LAST_PLAY_FG_YTG) {
+    const playAndSpike = cfg.spikeLineup + DRAIN_PLAY_SECONDS + 1;
+    if (!g.running) {
+      if (t <= (to > 0 ? 12 : playAndSpike)) return "fg";
+    } else if (to > 0) {
+      if (t <= 12) return "timeout";
+    } else if (t <= playAndSpike) {
+      return g.down <= 3 && t > cfg.spikeLineup + 1 ? "spike" : "fg";
+    } else if (t <= hurry + playAndSpike + 1) {
+      return "fg";
+    }
+  }
+
+  // The clock is running and time is tight (see DRIVE_TIME): stop it before anything else, whatever the
+  // down. With a timeout, call it. Without one, when there isn't even time to snap a play, spike it for one
+  // more. Not before a punt, which gives the ball away: the time would be theirs.
+  const tight = t <= driveTimeNeeded(g);
+  const punting = g.down === 4 && !(m >= -3 && g.ytg <= 42) && ((m === 0 && g.ytg >= PUNT_MIN_YTG) || (t > 300 && g.ytg >= 50));
+  if (g.running && !punting) {
+    if (to > 0 && tight && t <= 120) return "timeout";
+    if (to === 0 && t <= hurry + 1 && g.down <= 3 && t > cfg.spikeLineup + 1) return "spike";
   }
 
   // Need a touchdown, under 45 seconds, and the end zone within reach: go for it. Inside the 20 an end-zone
@@ -828,24 +977,31 @@ export function policy(g: GameState, cfg: SimConfig = DEFAULT_SIM): PlayCall {
   // only throw at the end zone beyond that. Chosen by testing rules over 1,760 late red-zone situations
   // (every distance, clock, timeouts, down, down 4 or 7): 32.1% average win probability against 21.3% for
   // throwing at the end zone every time, with the biggest gains near the goal line (49% against 19% from the 1).
-  if (m < -3 && t <= END_ZONE_SHOT_CLOCK && g.ytg <= 40 && !g.running) {
+  if (m < -3 && t <= END_ZONE_SHOT_CLOCK && g.ytg <= 40) {
     if (g.ytg > RED_ZONE) return "pass-deep";
     if ((g.ytg <= 2 && to > 0) || (g.ytg <= 1 && t >= 20)) return "run";
     return g.ytg <= 10 ? "pass-middle" : g.ytg <= 16 ? "pass-play-action" : "pass-deep";
   }
 
-  // Last play, or close to it, and a field goal won't do: take a shot at the end zone.
-  if (t <= 12 && (m < -3 || g.ytg > 42)) return "pass-deep";
+  // Last play, or close to it, and a field goal won't do: take a shot at the end zone. A tied team doesn't
+  // heave it on 4th down, though: it punts (below) and plays for overtime.
+  if (t <= 12 && (m < -3 || g.ytg > 42) && (g.down < 4 || m < 0)) return "pass-deep";
 
   if (g.down === 4) {
-    if (m >= -3 && g.ytg <= 42) return "fg";
+    const goForIt = g.toGo <= 2 ? "run" : g.toGo >= 15 ? "pass-deep" : "pass-middle";
+    // A field goal that ties or takes the lead: kick, unless there's time for them to answer it and the
+    // distance is short enough to go for it (see FOURTH_DOWN_GO).
+    if (m >= -3 && g.ytg <= 42) return goesForIt(g, FOURTH_DOWN_GO.tiedOrBehind) ? goForIt : "fg";
     // Tied and out of range: punt and play for overtime, rather than hand them a short field.
     if (m === 0 && g.ytg >= PUNT_MIN_YTG) return "punt";
     if (t > 300 && g.ytg >= 50) return "punt";
-    return g.toGo <= 2 ? "run" : g.toGo >= 15 ? "pass-deep" : "pass-middle";
+    return goForIt;
   }
-  if (g.running && t <= 120 && to > 0) return "timeout";
-  if (g.running && t <= 40 && g.down <= 2) return "spike";
+  if (g.running && t <= 40 && g.down <= 2 && to === 0 && tight) return "spike";
+  // Under a minute with less than half the time the drive needs: short throws can't get there, so throw deep.
+  if (t <= 60 && t <= DESPERATE_SHARE * driveTimeNeeded(g)) return "pass-deep";
+  // Short yardage near the goal line when a touchdown is needed: run it, if the clock can take a tackle in bounds.
+  if (m < -3 && g.ytg <= GOAL_LINE_RUN_YTG && g.toGo <= 3 && (to > 0 || !tight)) return "run";
   // Late passing, chosen by testing rules over 48 trailing situations against the calibrated odds:
   // play-action with field and time to work with, the sideline when there's no timeout and little time,
   // otherwise over the middle (sideline catches only get out of bounds about a quarter of the time).
@@ -979,14 +1135,82 @@ function scoreCalls(g: GameState, calls: readonly PlayCall[], n: number, cfg: Si
   const after = step(g, "timeout", streamFor(0), cfg).state;
   const timeoutWp = g.running
     // Stopping the clock changes the situation, so look ahead: the best play from there. This is
-    // what the win-probability meter shows after you call it.
-    ? bestScored(scoreCalls(after, availableCalls(after).filter((c) => c !== "timeout"), n, cfg)).wp
+    // what the win-probability meter shows after you call it. With more time than the drive needs, it
+    // can't beat the best play either: you could run that play and call the timeout later, if you need it.
+    ? Math.min(
+      bestScored(scoreCalls(after, availableCalls(after).filter((c) => c !== "timeout"), n, cfg)).wp,
+      earlyTimeout(g) ? bestScored(scoredPlays).wp : 1,
+    )
     // With the clock already stopped, nothing changes but the timeout count. Score the same best
     // play with one fewer timeout, on the same random streams, so the difference is what the timeout
     // was worth (taking the best of several noisy estimates would overstate it). It can't beat that
     // play outright: you could always run it and keep the timeout for later.
     : Math.min(scorePlay(after, bestScored(scoredPlays).call), bestScored(scoredPlays).wp);
   return [{ call: "timeout", wp: timeoutWp }, ...scoredPlays];
+}
+
+/** How `evaluateCallsPrecisely` spends its games. */
+export interface Precision {
+  /** Games per call for the first pass over every call. */
+  readonly quick: number;
+  /** Games per call for the second pass, over the calls close to the leader. */
+  readonly precise: number;
+  /** A call within this many win-probability points of the first pass's leader gets the second pass. */
+  readonly window: number;
+}
+
+/**
+ * Enough to grade a call: at 500 games an estimate can be off by up to 4 points, enough to call a near-tie
+ * a clear mistake; at 3,000 the worst case across late situations is under 2.
+ */
+export const GRADING: Precision = Object.freeze({ quick: 500, precise: 3000, window: 0.04 });
+
+/** One call's win probability over `n` games, on the shared random streams. */
+function scoreOne(g: GameState, call: PlayCall, n: number, cfg: SimConfig, tempo: Tempo = "auto"): number {
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
+    const r = streamFor(i);
+    sum += playOut(step(g, call, r, cfg, undefined, tempo).state, r, cfg);
+  }
+  return sum / n;
+}
+
+/** Plays (not a timeout) scored in two passes: all of them quickly, then the close ones precisely. */
+function playsPrecisely(g: GameState, calls: readonly PlayCall[], p: Precision, cfg: SimConfig): CallValues {
+  const first = calls.map((call): ScoredCall => ({ call, wp: scoreOne(g, call, p.quick, cfg) }));
+  const lead = Math.max(...first.map((v) => v.wp));
+  const [head, ...rest] = first.map((v) => (lead - v.wp <= p.window ? { call: v.call, wp: scoreOne(g, v.call, p.precise, cfg) } : v));
+  if (head === undefined) throw new RangeError("the game is over: there are no calls to score");
+  return [head, ...rest];
+}
+
+/**
+ * Every call available now, scored precisely enough to tell close calls apart without simulating every
+ * call at full precision: all of them get a quick pass, and those within `window` of the leader a precise
+ * one (calls further back are clearly worse either way). A timeout is scored as in `evaluateCalls`: with
+ * the clock running, by the best play from the stopped clock, found the same two-pass way.
+ */
+export function evaluateCallsPrecisely(g: GameState, cfg: SimConfig = DEFAULT_SIM, p: Precision = GRADING): CallValues {
+  const calls = availableCalls(g);
+  const plays = playsPrecisely(g, calls.filter((c) => c !== "timeout"), p, cfg);
+  if (!calls.includes("timeout")) return plays;
+  const after = step(g, "timeout", streamFor(0), cfg).state;
+  const best = bestScored(plays);
+  const timeoutWp = g.running
+    ? Math.min(bestScored(playsPrecisely(after, availableCalls(after).filter((c) => c !== "timeout"), p, cfg)).wp, earlyTimeout(g) ? best.wp : 1)
+    : Math.min(scoreOne(after, best.call, p.precise, cfg), best.wp);
+  return [{ call: "timeout", wp: timeoutWp }, ...plays];
+}
+
+/**
+ * Your win probability with one call at a tempo you pick for its snap, as precisely as
+ * `evaluateCallsPrecisely` scores the close calls, so it compares directly with the values there.
+ */
+export function scoreCallPrecisely(g: GameState, call: PlayCall, tempo: Tempo, cfg: SimConfig = DEFAULT_SIM, p: Precision = GRADING): number {
+  if (call !== "timeout") return scoreOne(g, call, p.precise, cfg, tempo);
+  const after = step(g, "timeout", streamFor(0), cfg, undefined, tempo).state;
+  if (g.running) return bestScored(playsPrecisely(after, availableCalls(after).filter((c) => c !== "timeout"), p, cfg)).wp;
+  return wpOf(evaluateCallsPrecisely(g, cfg, p), "timeout");
 }
 
 /**
@@ -1153,6 +1377,8 @@ export function whyNot(g: GameState, call: PlayCall): Reason | null {
     return reason(`A timeout stops the clock for them: it gives back the ${BURN} seconds you could have run off before the snap.`, "running-out-the-clock");
   if (call === "timeout" && !g.running)
     return reason("A timeout gains nothing with the clock already stopped, and spends one you may need later.", "timeouts");
+  if (call === "timeout" && hasTimeToSpare(g))
+    return reason(`You have more time than this drive needs (about ${Math.round(driveTimeNeeded(g))} seconds from here). Stopping the clock now only saves time for their answer if you score.`, "timeouts");
   if (call === "spike" && !g.running) return reason("A spike gains nothing with the clock already stopped, and throws away a down.", "spike");
   if (call === "kneel" && m <= 0 && !fgPlay(g)) return reason("Kneeling gives up a down and time you need.", "clock-rules");
   if (call === "pass-deep" && m <= 0) {
@@ -1186,6 +1412,13 @@ export function whyNot(g: GameState, call: PlayCall): Reason | null {
 const wastesResource = (g: GameState, call: PlayCall) => !g.running && (call === "timeout" || call === "spike");
 
 /**
+ * A timeout called with the clock running and more time than the drive needs. It isn't wasted the way one
+ * with the clock stopped is, but it's never the best call: the time it saves is time for their answer, and
+ * you could always call it later.
+ */
+export const earlyTimeout = (g: GameState) => g.running && hasTimeToSpare(g);
+
+/**
  * The smallest gap between two calls' estimates that's more than the simulation's own noise, for `games`
  * simulated per call: twice the standard error of the difference between two win probabilities near `p`
  * (at least CLOSE). At 3,000 games and 30% that's about 2.4 points; at 20,000 it would be 0.9, under CLOSE.
@@ -1205,7 +1438,8 @@ export function explain(
   const { call: best, wp: top } = bestScored(values);
   const mine = wpOf(values, chosen);
   const wasted = wastesResource(g, chosen);
-  if (chosen === best || (top - mine <= TIE && !wasted)) {
+  const early = chosen === "timeout" && earlyTimeout(g);
+  if (chosen === best || (top - mine <= TIE && !wasted && !early)) {
     return { verdict: "best", headline: `Best call: ${PLAY_CALLS[chosen]} (${pct(mine)})`, reasons: [whyBest(g, chosen, cfg)] };
   }
   const reasons = [whyBest(g, best, cfg)];
@@ -1282,16 +1516,16 @@ export interface Avoid {
   reason: Reason;
 }
 
-export function recommend(g: GameState, values: CallValues, cfg: SimConfig = DEFAULT_SIM): Recommendation {
+export function recommend(g: GameState, values: CallValues, cfg: SimConfig = DEFAULT_SIM, closeWithin: number = CLOSE): Recommendation {
   const { call: best, wp } = bestScored(values);
   const others = ranked(values).filter((v) => v.call !== best);
   // With the clock already stopped, a timeout or a spike only postpones the decision, so neither is a real alternative.
   const next = others.find((v) => g.running || (v.call !== "timeout" && v.call !== "spike"));
-  const runnerUp = next === undefined ? null : { call: next.call, wp: next.wp, close: wp - next.wp <= CLOSE };
+  const runnerUp = next === undefined ? null : { call: next.call, wp: next.wp, close: wp - next.wp <= closeWithin };
   const avoid = others
     // A timeout or spike with the clock stopped is always worth avoiding, even when it costs nothing
     // measurable: it gives up something and can't gain anything.
-    .filter((v) => wp - v.wp >= AVOID || wastesResource(g, v.call))
+    .filter((v) => wp - v.wp >= AVOID || wastesResource(g, v.call) || (v.call === "timeout" && earlyTimeout(g)))
     .flatMap((v): Avoid[] => {
       const why = whyNot(g, v.call);
       return why === null ? [] : [{ call: v.call, wp: v.wp, reason: why }];

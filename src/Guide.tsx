@@ -12,7 +12,7 @@ import { NFL_RULES, PLAY_TYPES, runOutThreshold, DOWNS } from "./engine";
 import { DEFAULT_ASSUMPTIONS } from "./trailing";
 import {
   bestScored, compression, evaluateCalls, fgDistance, fgMakeChance, goalLineRunChance, hailMaryChance, passOdds, runShape, winProbability, FG_EXTRA_YARDS,
-  AVOID, CLOSE, DEFAULT_SIM, EXPECTED_RUN_WINDOW, FG_TIMEOUT_AT, DEFENSE_TIMEOUT_WINDOW, FG_MAX_YTG, HAIL_MARY, MIN_SNAP, PASS_ODDS, PREVENT_WINDOW, PUNT_MIN_YTG,
+  AVOID, CLOSE, DEFAULT_SIM, DRIVE_TIME, EXPECTED_RUN_WINDOW, FG_TIMEOUT_AT, DEFENSE_TIMEOUT_WINDOW, FG_MAX_YTG, HAIL_MARY, MIN_SNAP, PASS_ODDS, PREVENT_WINDOW, PUNT_MIN_YTG,
   END_ZONE_SHOT_CLOCK, GO_FOR_TWO_MARGINS, OBVIOUS_TO_GO, TIED_KNEEL_CLOCK, OBVIOUS_WINDOW, PLAY_CALLS, RED_ZONE, SPECIAL_TEAMS, TIE, type GameState, type PassCall,
 } from "./sim";
 import { formatClock } from "./time";
@@ -190,8 +190,10 @@ function WinProbabilitySection() {
         </List.Item>
         <List.Item>
           <strong>After your call, both teams play by rules of thumb</strong>: the leading team kneels when that ends the
-          game and runs otherwise; a team that only needs a field goal drains the clock and kicks; a trailing team throws,
-          stops the clock with timeouts and spikes, goes for the end zone from {END_ZONE_SHOT_CLOCK} seconds when it needs
+          game and runs otherwise, and goes for it on short 4th downs when a first down would end it; a team that only needs
+          a field goal drains the clock and kicks last; a trailing team throws, stops the clock with timeouts and spikes only
+          when time is tight (about {DRIVE_TIME.base} seconds plus {DRIVE_TIME.perYard} a yard to go) and otherwise lets
+          the spare time run, goes for the end zone from {END_ZONE_SHOT_CLOCK} seconds when it needs
           a touchdown and is in reach (running from the 1 or 2, throwing over the middle inside the 10, play-action to the
           16, and at the end zone beyond that), and heaves it on the last play; a tied team deep in its own end kneels with{" "}
           {TIED_KNEEL_CLOCK} seconds or less, and punts on 4th down, to play for overtime. Real coaches can do better or worse,
@@ -395,6 +397,18 @@ function TimeoutsSection() {
           you're ahead, you rarely need yours, so the app values them near zero.
         </List.Item>
         <List.Item>
+          <strong>Only stop the clock when time is tight.</strong> A drive needs about {DRIVE_TIME.base} seconds plus{" "}
+          {DRIVE_TIME.perYard} for every yard to go (to the end zone, or to the {DRIVE_TIME.fgTarget} when a field goal is
+          enough). With more time than that, a timeout only saves time for the other team's answer if you score, so keep
+          it and let the spare time run before the snap; you can still call it later. The app never rates a timeout with
+          time to spare as the best call. Down 7 at the 5 with 1:01 left and three timeouts, for example, the drive needs
+          about 33 seconds: run the play and save the timeouts.
+        </List.Item>
+        <List.Item>
+          <strong>When you do need it, stop the clock first.</strong> If there isn't time to line up and snap a play, call
+          the timeout (or spike it, without one) before anything else, on any down.
+        </List.Item>
+        <List.Item>
           <strong>Never call one with the clock already stopped.</strong> It changes nothing now and costs you a stop later.
           The app scores that timeout as the same best play with one fewer timeout, never above it, and always flags it.
         </List.Item>
@@ -410,8 +424,10 @@ function TimeoutsSection() {
           <strong>Defenses use theirs too.</strong> A defense that's behind calls timeout after in-bounds plays in the last{" "}
           {DEFENSE_TIMEOUT_WINDOW / 60} minutes, to save time for its own offense, unless the two-minute warning is about
           to stop the clock anyway. So does a defense that's ahead or tied when the other team is draining for a field
-          goal that would beat it: it stops the clock after each run to keep time for its answer. If the kick would only
-          tie, it keeps them: a tie only means overtime.
+          goal that would beat it, but only when its timeouts can leave time to answer with: the offense lets the play
+          clock run before every snap the defense can't stop. If the kick would only tie, it keeps them: a tie only means
+          overtime. And a defense ahead by a score stops the clock when a team that needs a touchdown is in the red zone
+          under two minutes with time to spare, since that team would otherwise let the spare time run.
         </List.Item>
       </List>
     </Section>

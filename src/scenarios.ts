@@ -294,8 +294,10 @@ function explainScenario(id: ScenarioId, input: ScenarioInput, options: readonly
     case "rb-score":
       if (pick === 1) {
         return {
-          text: `Go down at the 1. You keep the ball and the clock: ${g.margin > 0 ? "kneel it out" : "drain it, then kick a chip-shot field goal"}. Scoring now gives them the ball back with time to answer: ${pts(diff)}.`,
-          section: g.margin > 0 ? "running-out-the-clock" : "field-goal-endgame",
+          text: g.margin < -3
+            ? `Go down at the 1. You still need the touchdown, but from the 1 you can let the clock run before you punch it in. Scoring now gives them the ball back with time to answer: ${pts(diff)}.`
+            : `Go down at the 1. You keep the ball and the clock: ${g.margin > 0 ? "kneel it out" : "drain it, then kick a chip-shot field goal"}. Scoring now gives them the ball back with time to answer: ${pts(diff)}.`,
+          section: g.margin > 0 ? "running-out-the-clock" : g.margin < -3 ? "red-zone" : "field-goal-endgame",
         };
       }
       return {

@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { Alert, Card, List, Stack, Text } from "@mantine/core";
 import { getRouteApi } from "@tanstack/react-router";
 import type { BestCallSearch } from "@situational-football/schemas";
-import { noGainCalls, evaluateCalls, recommend, DEFAULT_SIM, PLAY_CALLS, type GameState } from "./sim";
+import { noGainCalls, bestScored, evaluateCallsPrecisely, noiseMargin, recommend, DEFAULT_SIM, PLAY_CALLS, type GameState, type Precision } from "./sim";
 import { useClockField, useDebouncedByKey, yardsToGoalFrom } from "./fields";
 import { ModeLayout } from "./SituationForm";
 import Scorebug, { bugSituation } from "./Scorebug";
@@ -13,6 +13,9 @@ import { CallTable, WinMeter, tempoNote } from "./Trainer";
 import { GuideLink, ReasonText } from "./ReadMore";
 
 const route = getRouteApi("/best-call");
+
+/** Best call scores every option over 1,000 games, and those within 4 points of the leader over 6,000. */
+const ADVISING: Precision = { quick: 1000, precise: 6000, window: 0.04 };
 
 /** Score options from down 16 to up 16. Positive means you lead. */
 const MARGINS = Array.from({ length: 33 }, (_, i) => {
@@ -40,8 +43,11 @@ export default function AdvisorPanel() {
     if (g == null) return null;
     const cfg = { ...DEFAULT_SIM, hurryUp };
     if (g.clock === 0) return { ended: true as const, game: g, cfg };
-    const values = evaluateCalls(g, 1500, cfg);
-    return { ended: false as const, game: g, cfg, values, rec: recommend(g, values, cfg) };
+    // Every call gets a quick pass, and the close ones a precise one. Two calls only count as different
+    // when they're further apart than that precision can tell.
+    const values = evaluateCallsPrecisely(g, cfg, ADVISING);
+    const close = noiseMargin(bestScored(values).wp, ADVISING.precise);
+    return { ended: false as const, game: g, cfg, values, rec: recommend(g, values, cfg, close) };
   }, [sim.value]);
 
   const scorebug = (
@@ -89,8 +95,9 @@ export default function AdvisorPanel() {
           </Card>
 
           <Text size="xs" c="dimmed">
-            {tempoNote(analysis.game, analysis.cfg)} Each option is scored over 1,500 simulated games in which both teams then
-            follow rule-of-thumb play-calling, using the same model as the trainer.{" "}
+            {tempoNote(analysis.game, analysis.cfg)} Each option is scored over {ADVISING.quick.toLocaleString("en-US")} simulated
+            games, and the close ones over {ADVISING.precise.toLocaleString("en-US")}, in which both teams then follow
+            rule-of-thumb play-calling, using the same model as the trainer.{" "}
             <GuideLink section="win-probability">How win probability works</GuideLink>
           </Text>
           <HurryUpSetting value={s.hurryUp} onChange={(hurryUp) => set({ hurryUp })} />

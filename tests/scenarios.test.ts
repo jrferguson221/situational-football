@@ -39,10 +39,11 @@ describe("scenarios", () => {
     expect(earlier.flipNote).toMatch(/or less left, get out of bounds instead/);
   });
 
-  it("RB: tied late, go down at the 1 instead of scoring; down 4, take the touchdown", () => {
+  it("RB: tied late, go down at the 1 instead of scoring; down 4 with 0:30 left, take the touchdown", () => {
     const tied = analyzeScenario("rb-score", presetInput("rb-score"), 1000, 200);
     expect(tied.options[tied.better ?? 0].id).toBe("go-down");
-    const behind = analyzeScenario("rb-score", presetInput("rb-score", { margin: -4 }), 1000, 200);
+    // Down 4 there's no kick to fall back on, and with 0:30 left no time to spare for a second try.
+    const behind = analyzeScenario("rb-score", presetInput("rb-score", { margin: -4, clock: 30 }), 1000, 200);
     expect(behind.options[behind.better ?? 1].id).toBe("score");
   });
 
