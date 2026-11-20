@@ -1305,6 +1305,14 @@ function whyBest(g: GameState, call: PlayCall, cfg: SimConfig): Reason {
   // play's value is the time that comes off before the snap.
   if (m > 0 && g.down === 4 && g.running && (call === "run" || call === "kneel" || call.startsWith("pass-")))
     return reason(`Let the play clock run down first: that takes ${BURN} seconds off before the snap. On 4th down, if you're stopped they get the ball with the clock stopped, so the time has to come off before the snap, not after. Converting ends the game.`, "running-out-the-clock");
+  // Ahead and going for it on 4th down, with the clock stopped: weigh it against the punt.
+  if (m > 0 && g.down === 4 && (call === "run" || call.startsWith("pass-"))) {
+    const opp = g.timeouts[other(g.poss)];
+    const how = call === "run"
+      ? `A run is the surest way to get ${g.toGo === 1 ? "a yard" : `${g.toGo} yards`}.`
+      : `A ${PLAY_CALLS[call].toLowerCase()} completes about ${pct(passOdds(coverageFor(g, g.clock), call as PassCall, g.ytg).complete)} of the time${call === "pass-deep" ? ", for 20+ yards" : ""}.`;
+    return reason(`Going for it on 4th & ${g.toGo}: a first down lets you keep the ball and the clock. A punt gives them ${formatClock(g.clock)} and ${opp} timeout${opp === 1 ? "" : "s"} to drive for the ${m <= 3 ? "field goal" : "touchdown"} they need, which is nearly as bad as failing here. ${how}`, "fourth-down");
+  }
   switch (call) {
     case "kneel":
       if (m > 0 && canKneelOut(g))
@@ -1408,7 +1416,9 @@ export function whyNot(g: GameState, call: PlayCall): Reason | null {
     return reason("Kicking now leaves them time to answer. Drain the clock first.", "field-goal-endgame");
   if (call === "punt") {
     return reason(
-      m <= 0 ? "Punting gives the ball back when you need to score." : "Punting gives the ball back when you still had a good chance to keep it.",
+      m <= 0
+        ? "Punting gives the ball back when you need to score."
+        : `Punting gives them the ball back with ${formatClock(g.clock)} left and ${g.timeouts[other(g.poss)]} timeout${g.timeouts[other(g.poss)] === 1 ? "" : "s"}: time to drive for the ${m <= 3 ? "field goal" : "touchdown"} they need.`,
       "fourth-down",
     );
   }

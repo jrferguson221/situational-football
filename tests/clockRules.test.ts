@@ -200,3 +200,15 @@ describe("grading a call when you're ahead", () => {
     expect(recommend(kneelOut, evaluateCallsPrecisely(kneelOut)).avoid.map((a) => a.call)).toEqual(expect.arrayContaining(["spike", "timeout"]));
   });
 });
+
+it("ahead on 4th down, the reasons for going for it and against punting fit a team that's ahead", () => {
+  // Up 1 on 4th & 15 at your own 32 with 3:51 left, 1 timeout to their 3: punt and a deep shot are close.
+  const g: GameState = { ...g0, clock: 231, running: false, down: 4, toGo: 15, ytg: 68, margin: 1, timeouts: { you: 1, opp: 3 } };
+  const values = evaluateCallsPrecisely(g);
+  const x = explain(g, "punt", values, undefined, noiseMargin(bestScored(values).wp, GRADING.precise));
+  expect(x.verdict).not.toBe("worse");
+  const text = x.reasons.map((r) => r.text).join(" ");
+  expect(text).not.toContain("You need a big play");
+  expect(text).toContain("3 timeouts to drive for the field goal they need");
+  expect(text).toContain("A deep pass completes");
+});
