@@ -172,3 +172,31 @@ describe("precise scoring", () => {
     expect(wpOf(a, "pass-middle")).toBeGreaterThan(0);
   });
 });
+
+describe("grading a call when you're ahead", () => {
+  // Up 3 with 1:10 left at the opponent's 45, the clock running, and they're out of timeouts: kneel-downs
+  // end the game, so every sensible call rounds to 100%.
+  const kneelOut: GameState = { ...g0, clock: 70, ytg: 45, margin: 3, timeouts: { you: 3, opp: 0 } };
+  const grade = (g: GameState, call: Parameters<typeof explain>[1]) => {
+    const values = evaluateCallsPrecisely(g);
+    return explain(g, call, values, undefined, noiseMargin(bestScored(values).wp, GRADING.precise));
+  };
+
+  it("when kneels end the game, only the kneel is best: a run is close, anything else a mistake", () => {
+    expect(grade(kneelOut, "kneel").verdict).toBe("best");
+    expect(grade(kneelOut, "run").verdict).toBe("close");
+    for (const call of ["spike", "timeout", "pass-deep", "pass-screen", "fg"] as const) expect(grade(kneelOut, call).verdict).toBe("worse");
+    // The headline doesn't claim "100% vs your 100%".
+    expect(grade(kneelOut, "spike").headline).toBe("Better call: Kneel (it ends the game)");
+  });
+
+  it("a spike or a timeout with the clock running is a mistake, even when it ties", () => {
+    const notOver: GameState = { ...kneelOut, clock: 150, timeouts: { you: 3, opp: 3 } };
+    for (const call of ["spike", "timeout"] as const) {
+      const x = grade(notOver, call);
+      expect(x.verdict).toBe("worse");
+      expect(x.headline).toContain("stopped the clock for them");
+    }
+    expect(recommend(kneelOut, evaluateCallsPrecisely(kneelOut)).avoid.map((a) => a.call)).toEqual(expect.arrayContaining(["spike", "timeout"]));
+  });
+});

@@ -1380,6 +1380,18 @@ export function whyNot(g: GameState, call: PlayCall): Reason | null {
   if (call === "timeout" && hasTimeToSpare(g))
     return reason(`You have more time than this drive needs (about ${Math.round(driveTimeNeeded(g))} seconds from here). Stopping the clock now only saves time for their answer if you score.`, "timeouts");
   if (call === "spike" && !g.running) return reason("A spike gains nothing with the clock already stopped, and throws away a down.", "spike");
+  if (call === "spike" && m > 0)
+    return reason(`A spike stops the clock for them and throws away a down: it gives back the ${BURN} seconds you could have run off before the snap.`, "running-out-the-clock");
+  if (m > 0 && canKneelOut(g) && call !== "kneel") {
+    return reason(
+      call === "run"
+        ? "Kneel-downs end the game from here. A run does too, but risks a fumble for nothing."
+        : call === "fg"
+          ? "Kneel-downs end the game from here. A field-goal try only gives them a chance: a miss or a block hands them the ball with time left."
+          : "Kneel-downs end the game from here. A pass only gives them a chance: an incompletion stops the clock, and a turnover hands them the ball.",
+      "running-out-the-clock",
+    );
+  }
   if (call === "kneel" && m <= 0 && !fgPlay(g)) return reason("Kneeling gives up a down and time you need.", "clock-rules");
   if (call === "pass-deep" && m <= 0) {
     const coverage = coverageFor(g, g.clock);
@@ -1409,7 +1421,8 @@ export function whyNot(g: GameState, call: PlayCall): Reason | null {
  * With the clock already stopped, a timeout spends a timeout and a spike spends a down, and neither
  * gains anything. Any cost at all makes them a mistake, even one too small to otherwise count.
  */
-const wastesResource = (g: GameState, call: PlayCall) => !g.running && (call === "timeout" || call === "spike");
+const wastesResource = (g: GameState, call: PlayCall) =>
+  (call === "timeout" || call === "spike") && (!g.running || marginFor(g, g.poss) > 0);
 
 /**
  * A timeout called with the clock running and more time than the drive needs. It isn't wasted the way one
@@ -1439,6 +1452,17 @@ export function explain(
   const mine = wpOf(values, chosen);
   const wasted = wastesResource(g, chosen);
   const early = chosen === "timeout" && earlyTimeout(g);
+  // Ahead with kneel-downs that end the game: only the kneel is best. Every other call can only add risk,
+  // even when the simulations round them all to 100%.
+  if (marginFor(g, g.poss) > 0 && chosen !== "kneel" && canKneelOut(g)) {
+    const kneel = values.find((v) => v.call === "kneel")?.wp ?? top;
+    const why = [whyBest(g, "kneel", cfg), ...(whyNot(g, chosen) ? [whyNot(g, chosen)!] : [])];
+    // When both round to the same percentage, the numbers don't say anything: say what the kneel does instead.
+    const odds = pct(kneel) === pct(mine) ? "it ends the game" : `${pct(kneel)} vs your ${pct(mine)}`;
+    return chosen === "run"
+      ? { verdict: "close", headline: `Close: Kneel was the safer call (${pct(kneel) === pct(mine) ? "it ends the game with no risk" : `${pct(kneel)} vs ${pct(mine)}`})`, reasons: why }
+      : { verdict: "worse", headline: `Better call: Kneel (${odds})`, reasons: why };
+  }
   if (chosen === best || (top - mine <= TIE && !wasted && !early)) {
     return { verdict: "best", headline: `Best call: ${PLAY_CALLS[chosen]} (${pct(mine)})`, reasons: [whyBest(g, chosen, cfg)] };
   }
@@ -1449,7 +1473,9 @@ export function explain(
     const what = chosen === "timeout" ? "Your timeout" : "Your spike";
     return {
       verdict: "worse",
-      headline: `Better call: ${PLAY_CALLS[best]} (${pct(top)}). ${what} gained nothing: the clock was already stopped.`,
+      headline: g.running
+        ? `Better call: ${PLAY_CALLS[best]} (${pct(top)}). ${what} stopped the clock for them.`
+        : `Better call: ${PLAY_CALLS[best]} (${pct(top)}). ${what} gained nothing: the clock was already stopped.`,
       reasons,
     };
   }
